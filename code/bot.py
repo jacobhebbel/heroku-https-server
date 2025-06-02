@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-class SocialMediaChatbot:
+
+class GPTInterface:
 
     def __init__(self):
         
@@ -49,7 +50,6 @@ class SocialMediaChatbot:
             if prompt.get('role') == 'user':
                 self.input.remove(prompt)
                 return
-
     
     def changeModel(self, modelType):
         if modelType == '':
@@ -81,3 +81,128 @@ class SocialMediaChatbot:
         self.removeMostRecentUserPrompt()
 
         return response
+    
+
+class SocialMediaChatbot:
+
+    def __init__(self):
+        self.model = ModelInterface()
+        self.twitter = TwitterInterface()
+        pass
+
+    def __str__(self):
+        print('Beep Boop, I\'m a bot!\nI send messages to twitter with the help of OpenAI')
+        pass
+
+    # returns true if a mention is heard
+    def listenForMentions(self, duration):
+        pass
+ 
+    def postTweet(self, tweet):
+        
+        
+        pass
+
+    def respondToMention(self, user, mention):
+        pass
+
+
+class ModelInterface:
+
+    def __init__(self):
+        self.key = os.getenv('TWITTER_API_KEY')
+        self.client = OpenAI()
+        self.previousConversationId = None
+        self.userToLastConversationId = {}
+
+        self.instructions = 'Speak like a friendly social media account'
+        self.statelessConversation = True
+        self.modelInput = []
+        self.model = 'gpt-3.5-turbo-0125'
+
+    def validatePrompt(self, prompt):
+        if not prompt or not isinstance(prompt, str):
+            raise Exception(f'Systme prompt provided to Model Interface is null or not type string: \nprompt: {prompt}\nprompt type: {type(prompt)}')
+
+    def setSystemPrompt(self, prompt):
+        self.validatePrompt(self, prompt)
+
+        # O(n) operation
+        for entry in self.modelInput:
+            if isinstance(entry, dict) and 'system' in entry.keys():
+                self.modelInput.remove(entry)
+
+        self.modelInput.append({'system': f'{prompt}'})
+        
+    def addAssistantPrompt(self, prompt):
+        self.validatePrompt(self, prompt)
+
+        self.modelInput.append({'assistant': f'{prompt}'})
+
+    def clearAssistantPrompts(self):
+        
+        # O(n) operation
+        for entry in self.modelInput:
+            if isinstance(entry, dict) and 'assistant' in entry.keys():
+                self.modelInput.remove(entry)
+
+    def setUserPrompt(self, prompt):
+        self.validatePrompt(prompt)
+
+        # O(n) operation
+        for entry in self.modelInput:
+            if isinstance(entry, dict) and 'user' in entry.keys():
+                self.modelInput.remove(entry)
+
+        self.modelInput.append({'user': f'{prompt}'})
+
+    def setModel(self, modelType):
+
+        if modelType is None or not isinstance(modelType, str):
+            raise Exception(f'provided model type is not acceptable:\nmodel={modelType}\n model type={type(modelType)}')
+
+        self.model = modelType
+
+    def useCustomInputJSON(self, customInputJSON):
+        pass
+
+    def sendModelRequest(self, user, message):
+        pass
+
+    def getModelResponse(self, message, user=None):
+        
+        # checking if this user has talked to the model before
+        if user and isinstance(user, str):
+            self.lastConversationId = self.userToLastConversationId.get(user)
+
+        self.setUserPrompt(message)
+
+        response = self.client.responses.create(
+            model=self.model,                               # controls which model the bot uses
+            instructions=self.instructions,                 # controls how the model acts 
+            input=self.input,                               # controls the inputs
+            previous_response_id=self.previousCoversationId # references the last conversation with the user
+
+        )
+        
+        id = response.id
+        self.userReferenceDictionary.update({f'{user}': f'{id}'})
+
+        return response.text
+
+class TwitterInterface:
+
+    def __init__(self):
+        pass
+
+    def getClient(self):
+        pass
+    
+    def openStream(self):
+        pass
+
+    def getMentions(self):
+        pass
+
+    def postTweet(self, message):
+        pass
