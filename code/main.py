@@ -1,34 +1,21 @@
 from bot import SocialMediaChatbot
-
-
-
-"""
-Program Structure:
-1. someone @s my bot
-2. my bot reads their message
-3. my bot adds it to its userPrompt input
-4. my bot makes the api call to gpt, gets a response
-5. my bot responds with the text from gpt
-"""
-
-def getClient():
-    pass
+import random
 
 
 def main():
 
-    socialMediaClient = getClient()
-    myBot = SocialMediaChatbot()
-
+    bot = SocialMediaChatbot()
+    timeSpentRespondingToMentions = 10000       # in seconds
+    subjectPool = ['sports', 'the weather', 'lightbulb manufacturing practices', 'the internet', 'fun facts']
+    
     while True:
+        
+        randomSubject = random.choice(subjectPool)
 
-        if socialMediaClient.getsNotification():
-            notification = socialMediaClient.getMostRecentNotification()
-            user = notification.userId
-            message = notification.message
+        bot.respondToMentions(duration=timeSpentRespondingToMentions)
+        bot.postTweetFromSubjectPool(chosenSubject=randomSubject)
 
-            response = myBot.sendMessage(message, user)
-
-            socialMediaClient.postResponse(response.text)
-
+if __name__ == '__main__':
+    main()
+        
 
