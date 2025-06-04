@@ -5,7 +5,7 @@ import time
 import queue
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 '''
 userID: [chats between user and bot as dictionaries]
@@ -27,6 +27,13 @@ class SocialMediaChatbot:
         self.stream = StreamInterface()
         self.userHistories = {}             # maps a user id to their message history with the bot
         self.mostRecentMentionId = None
+
+        print('testing env variables')
+        print('bearer:\t' + str(os.getenv('TWITTER_BEARER_TOKEN')))
+        print('access token:\t' + str(os.getenv('TWITTER_ACCESS_TOKEN')))
+        print('access secret:\t' + str(os.getenv('TWITTER_ACCESS_SECRET')))
+        print('consumer key:\t' + str(os.getenv('TWITTER_CONSUMER_KEY')))
+        print('consumer secret:\t' + str(os.getenv('TWITTER_CONSUMER_SECRET')))
 
     def __str__(self):
         s = 'Beep Boop, I\'m a bot!\nI send messages to twitter with the help of OpenAI'
@@ -82,15 +89,15 @@ class SocialMediaChatbot:
         messageId = mention.id
         userChatHistory = self.getUserHistory(user)
         
-        modelResponse = self.model.writeMentionResponse(message, userChatHistory).text
-        tweet = self.twitter.respondToMention(messageId, modelResponse)
+        modelResponse = self.model.writeMentionResponse(message, userChatHistory)
+        tweet = self.twitter.respondToMention(messageId, modelResponse.output_text)
 
         self.saveMention(mention, tweet)
         self.printInteraction(mention, tweet)
         self.updateMostRecentMention(messageId)
     
     def postTweetFromSubjectPool(self, chosenSubject):
-        tweet = self.model.writeRandomTweet(f'Write a short status about {chosenSubject} that is engaging and family friendly')
+        tweet = self.model.writeRandomTweet(f'{chosenSubject}')
         self.twitter.postTweet(tweet)
 
     def getUserHistory(self, userID):
@@ -133,7 +140,7 @@ class SocialMediaChatbot:
 class ModelInterface:
 
     def __init__(self):
-        self.key = os.getenv('TWITTER_API_KEY')
+        self.key = str(os.getenv('OPENAI_API_KEY'))
         self.client = OpenAI()
 
         self.modelInput = []
@@ -145,7 +152,7 @@ class ModelInterface:
         prompt = message
         self.addUserPrompt(prompt)
         response = self.getModelResponse()
-        print(response.text)
+        print(response.output_text)
         return response
     
     def writeRandomTweet(self, subject):
@@ -153,7 +160,7 @@ class ModelInterface:
         prompt = 'Write a short twitter post about this subject:\n' + f'{subject}'
         self.addUserPrompt(prompt)
         response = self.getModelResponse()
-        print(response.text)
+        print(response.output_text)
         return response
 
     def getModelResponse(self):
@@ -182,7 +189,6 @@ class ModelInterface:
         for entry in self.modelInput:
             if isinstance(entry, dict) and 'system' in entry.keys():
                 self.modelInput.remove(entry)
-
         self.modelInput.append({'role': 'system', 'content': str(prompt)})
         
     def addAssistantPrompt(self, prompt):
@@ -213,10 +219,10 @@ class StreamClient(tweepy.StreamingClient):
         print('stream is closed')
 
     def on_tweet(self, tweet):
-        
         self.saveMention(tweet)
         self.printMention(tweet)
         self.mentionsQueue.put(tweet)
+
     def on_error(self, error):
         raise Exception(f'error occurred during streaming: {error}')
 
@@ -224,9 +230,8 @@ class StreamClient(tweepy.StreamingClient):
 class StreamInterface:
 
     def __init__(self):
-        
         self.mentionsQueue = queue.Queue()
-        self.client = StreamClient(bearer_token=f'{os.getenv('TWITTER_BEARER_TOKEN')}',
+        self.client = StreamClient(bearer_token=str(os.getenv('TWITTER_BEARER_TOKEN')),
                                    mentionsQueue=self.mentionsQueue)
         
         self.defaultRule = tweepy.StreamRule(value='(@jacob\'s_twitter_bot OR to:jacob\'s_twitter_bot) -is:retweet ',
@@ -263,11 +268,11 @@ class TwitterInterface:
 
     def getClient(self):
         return tweepy.Client(
-            bearer_token=os.getenv("TWITTER_BEARER_TOKEN"),
-            consumer_key=f'{os.getenv('TWITTER_CONSUMER_KEY')}',
-            consumer_secret=f'{os.getenv('TWITTER_CONSUMER_SECRET')}',
-            access_token=f'{os.getenv('TWITTER_ACCESS_TOKEN')}',
-            access_token_secret=f'{os.getenv('TWITTER_ACCESS_SECRET')}'
+            bearer_token=str(os.getenv("TWITTER_BEARER_TOKEN")),
+            consumer_key=str(os.getenv('TWITTER_CONSUMER_KEY')),
+            consumer_secret=str(os.getenv('TWITTER_CONSUMER_SECRET')),
+            access_token=str(os.getenv('TWITTER_ACCESS_TOKEN')),
+            access_token_secret=str(os.getenv('TWITTER_ACCESS_SECRET'))
         )
     
     def getNewMentions(self, sinceID=None):
@@ -277,12 +282,18 @@ class TwitterInterface:
         ).data or []
     
     def postTweet(self, message):
-        response = self.client.create_tweet(text=f'{message}')
-        tweetID = response.data['id']
-        return self.client.get_tweet(tweetID)
+
+        try:
+            response = self.client.create_tweet(text=str(message))
+            tweetID = response.data['id']
+            return self.client.get_tweet(tweetID)
+        
+        except tweepy.errors.Forbidden as e:
+            print("403 Forbidden:", e.response.text)
+            raise
     
     def respondToMention(self, userID, reply):
-        response = self.client.create_tweet(text=f'{reply}', in_reply_to_tweet_id=userID)
+        response = self.client.create_tweet(text=str(reply), in_reply_to_tweet_id=userID)
         tweetID = response.data['id']
         return self.client.get_tweet(tweetID)
 
