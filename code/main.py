@@ -6,17 +6,15 @@ import time
 def main():
 
     bot = SocialMediaChatbot()
+    bot.authenticate()
+
     timeSpentRespondingToMentions = 10000       # in seconds
     requestDelay = 60
     subjectPool = ['sports', 'the weather', 'lightbulb manufacturing practices', 'the internet', 'fun facts']
+    randomSubject = random.choice(subjectPool)
     
-    while True:
-        
-        print('starting loop')
-        randomSubject = random.choice(subjectPool)
-        #bot.respondToMentionsViaPolling(duration=timeSpentRespondingToMentions, interval=requestDelay)
-        bot.postTweetFromSubjectPool(chosenSubject=randomSubject)
-        time.sleep(100)
+    bot.postTweetFromSubjectPool(chosenSubject=randomSubject)
+    bot.respondToMentionsViaPolling(duration=timeSpentRespondingToMentions, interval=requestDelay)
 
 if __name__ == '__main__':
     main()
