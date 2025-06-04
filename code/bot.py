@@ -7,6 +7,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+'''
+userID: [chats between user and bot as dictionaries]
+element of .get(userID):
+{
+    message: text,
+    fromUser: bool,
+    isReply: bool,
+    replyId: text
+}
+
+'''
 
 class SocialMediaChatbot:
 
@@ -14,15 +25,15 @@ class SocialMediaChatbot:
         self.model = ModelInterface()
         self.twitter = TwitterInterface()
         self.stream = StreamInterface()
-        self.mentions = []
+        self.userHistories = {}             # maps a user id to their message history with the bot
+        self.mostRecentMentionId = None
 
     def __str__(self):
         s = 'Beep Boop, I\'m a bot!\nI send messages to twitter with the help of OpenAI'
-        s += f'\nI am using openAI\'s {self.model.model} to respond to queries'
+        s += f'\nI am using openAI\'s {self.model.modelType} to respond to queries'
         return s
 
-    # returns true if a mention is heard
-    def respondToMentions(self, duration=100):
+    def respondToMentionsViaStream(self, duration=100):
 
         # 1. start the stream
         # 2. if a tweet is found then fetch it
@@ -50,44 +61,73 @@ class SocialMediaChatbot:
                 
         self.stream.endStream()
 
-    def postTweetFromSubjectPool(self, chosenSubject):
+    def respondToMentionsViaPolling(self, duration=10000, interval=900):
+        print('starting polling process. sleeping for 15 mins then pulling data')
+        startTime = time.time()
+
+        while time.time() - startTime < duration:
+            
+            time.sleep(interval)
+            unseenMentions = self.twitter.getNewMentions(sinceId=self.mostRecentMentionId)
+            print(f'got {len(unseenMentions)} mentions from twitter api call')
+
+            for mention in unseenMentions:
+                self.processMention(mention)
         
-        tweet = self.model.writeStatusUpdate(
-            message=f'Write a short status about {chosenSubject} that is engaging and family friendly'
-        )
+        print('stopping polling for mentions')
+    
+    def processMention(self, mention):
+        user = mention.author_id
+        message = mention.text
+        messageId = mention.id
+        userChatHistory = self.getUserHistory(user)
+        
+        modelResponse = self.model.writeMentionResponse(message, userChatHistory).text
+        tweet = self.twitter.respondToMention(messageId, modelResponse)
+
+        self.saveMention(mention, tweet)
+        self.printInteraction(mention, tweet)
+        self.updateMostRecentMention(messageId)
+    
+    def postTweetFromSubjectPool(self, chosenSubject):
+        tweet = self.model.writeRandomTweet(f'Write a short status about {chosenSubject} that is engaging and family friendly')
         self.twitter.postTweet(tweet)
 
-    def saveMention(self, tweet):
+    def getUserHistory(self, userID):
+        history = self.userHistories.get(userID) if userID in self.userHistories.keys() else []
+        return history[-5:]
 
-        authorId = tweet.author_id
-        message = tweet.text
-        messageId = tweet.id
-        conversationId = tweet.conversation_id
+    def saveMention(self, mention, reply):
 
-        self.mentions.append({
-            'userId': str(authorId),
-            'message': str(message),
-            'messageId': str(messageId),
-            'conversationId': str(conversationId)
-        })
+        userID = mention.author_id
+        if userID not in self.userHistories.keys():
+            self.userHistories.update({f'{userID}': []})
+        
+        # adds an entry for the user's mention and an entry for the model's response
+        self.userHistories.get(userID).extend([
+            {'message': str(mention.text), 'messageID': str(mention.id), 'fromUser': False, 'isReply': False, 'replyID': ''},
+            {'message': str(reply.text), 'messageID': str(reply.id), 'fromUser': True, 'isReply': True, 'replyID': ''}
+        ])
 
-    def printMention(self, tweet):
-
-        authorId = tweet.author_id
-        message = tweet.text
-        messageId = tweet.id
-        conversationId = tweet.conversation_id
+    def printInteraction(self, mention, reply):
 
         s = f'''\n
-        from {authorId}\n
+        from {mention.author_id}:\n
         \n
         \t@jacob's_twitter_bot\n
-        \t{message}\n\n
-        message id={messageId}\n
-        conversation id={conversationId}
+        \t{mention.text}\n\n
+        message id={mention.id}\n
+        \n\n
+        from jacob's_twitter_bot:\n
+        \t@user\n
+        \t{reply.text}\n\n
+        message id={reply.id}\n
         ------------------------- END OF MESSAGE -------------------------
         '''
         print(s)
+
+    def updateMostRecentMention(self, id):
+        self.mostRecentMentionId = id
 
 
 class ModelInterface:
@@ -95,13 +135,43 @@ class ModelInterface:
     def __init__(self):
         self.key = os.getenv('TWITTER_API_KEY')
         self.client = OpenAI()
-        self.previousConversationId = None
-        self.userToLastConversationId = {}
 
-        self.instructions = 'You are a friendly twitter account responding to mentions'
-        self.statelessConversation = True
         self.modelInput = []
-        self.model = 'gpt-3.5-turbo-0125'
+        self.modelType = 'gpt-3.5-turbo-0125'
+
+    def writeMentionResponse(self, message, history):
+        self.clearPromptHistory()
+        self.injectUserChatHistory(history)
+        prompt = message
+        self.addUserPrompt(prompt)
+        response = self.getModelResponse()
+        print(response.text)
+        return response
+    
+    def writeRandomTweet(self, subject):
+        self.clearPromptHistory()
+        prompt = 'Write a short twitter post about this subject:\n' + f'{subject}'
+        self.addUserPrompt(prompt)
+        response = self.getModelResponse()
+        print(response.text)
+        return response
+
+    def getModelResponse(self):
+        print(self.modelInput)
+        return self.client.responses.create(
+            model=self.modelType,                               # sets the model type to use
+            input=self.modelInput                               # gives model instructions, user history, and user prompt
+        )
+
+    def injectUserChatHistory(self, history):
+        for chat in history:
+            if chat.fromUser:
+                self.addUserPrompt(chat)
+            else:
+                self.addAssistantPrompt(chat)
+
+    def clearPromptHistory(self):
+        self.modelInput = [{'role': 'system', 'content': 'You are a dignified and playful twitter account that interacts with users via mentions and makes random tweets'}]
 
     def validatePrompt(self, prompt):
         if not prompt or not isinstance(prompt, str):
@@ -109,73 +179,25 @@ class ModelInterface:
 
     def setSystemPrompt(self, prompt):
         self.validatePrompt(self, prompt)
-
-        # O(n) operation
         for entry in self.modelInput:
             if isinstance(entry, dict) and 'system' in entry.keys():
                 self.modelInput.remove(entry)
 
-        self.modelInput.append({'system': f'{prompt}'})
+        self.modelInput.append({'role': 'system', 'content': str(prompt)})
         
     def addAssistantPrompt(self, prompt):
         self.validatePrompt(self, prompt)
+        self.modelInput.append({'role': 'assistant', 'content': str(prompt)})
 
-        self.modelInput.append({'assistant': f'{prompt}'})
-
-    def clearAssistantPrompts(self):
-        
-        # O(n) operation
-        for entry in self.modelInput:
-            if isinstance(entry, dict) and 'assistant' in entry.keys():
-                self.modelInput.remove(entry)
-
-    def setUserPrompt(self, prompt):
+    def addUserPrompt(self, prompt):
         self.validatePrompt(prompt)
-
-        # O(n) operation
-        for entry in self.modelInput:
-            if isinstance(entry, dict) and 'user' in entry.keys():
-                self.modelInput.remove(entry)
-
-        self.modelInput.append({'user': f'{prompt}'})
+        self.modelInput.append({'role': 'user', 'content': str(prompt)})
 
     def setModel(self, modelType):
-
         if modelType is None or not isinstance(modelType, str):
             raise Exception(f'provided model type is not acceptable:\nmodel={modelType}\n model type={type(modelType)}')
 
-        self.model = modelType
-
-    def getModelResponse(self, message, user=None):
-        
-        # checking if this user has talked to the model before
-        if user and isinstance(user, str):
-            self.previousConversationId = self.userToLastConversationId.get(user)
-
-        self.setUserPrompt(message)
-
-        response = self.client.responses.create(
-            model=self.model,                                   # controls which model the bot uses
-            instructions=self.instructions,                     # controls how the model acts 
-            input=self.modelInput,                              # controls the inputs
-            previous_response_id=self.previousConversationId    # references the last conversation with the user
-
-        )
-        
-        id = response.id
-        self.userToLastConversationId.update({f'{user}': f'{id}'})
-
-        return response.text
-
-    def writeMentionResponse(self, userMessage, userId):
-        
-        userMessage = 'The following message is a prompt for writing a response to a mention from a twitter user:\n' + userMessage
-        return self.getModelResponse(userMessage, userId)
-
-    def writeStatusUpdate(self, statusPrompt):
-
-        statusPrompt = 'The following message is a prompt for writing a twitter status update:\n' + statusPrompt
-        return self.getModelResponse(statusPrompt)
+        self.modelType = modelType
 
 
 class StreamClient(tweepy.StreamingClient):
@@ -237,18 +259,30 @@ class TwitterInterface:
 
     def __init__(self):
         self.client = self.getClient()
+        self.id = self.client.get_me().data.id
 
     def getClient(self):
         return tweepy.Client(
+            bearer_token=os.getenv("TWITTER_BEARER_TOKEN"),
             consumer_key=f'{os.getenv('TWITTER_CONSUMER_KEY')}',
             consumer_secret=f'{os.getenv('TWITTER_CONSUMER_SECRET')}',
-            access_token_key=f'{os.getenv('TWITTER_ACCESS_TOKEN')}',
+            access_token=f'{os.getenv('TWITTER_ACCESS_TOKEN')}',
             access_token_secret=f'{os.getenv('TWITTER_ACCESS_SECRET')}'
         )
     
-    def postTweet(self, message):
-        self.client.create_tweet(text=f'{message}')
+    def getNewMentions(self, sinceID=None):
+        return self.client.get_users_mentions(
+            id=self.id,
+            since_id=sinceID
+        ).data or []
     
-    def respondToMention(self, userId, reply):
-        self.client.create_tweet(text=f'{reply}', in_reply_to_tweet_id=userId)
+    def postTweet(self, message):
+        response = self.client.create_tweet(text=f'{message}')
+        tweetID = response.data['id']
+        return self.client.get_tweet(tweetID)
+    
+    def respondToMention(self, userID, reply):
+        response = self.client.create_tweet(text=f'{reply}', in_reply_to_tweet_id=userID)
+        tweetID = response.data['id']
+        return self.client.get_tweet(tweetID)
 
