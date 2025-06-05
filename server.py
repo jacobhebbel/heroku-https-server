@@ -18,7 +18,7 @@ def storeAuth():
 @app.route('/get')
 def retrieveUrl():
     global authCredentials
-    if authCredentials.ok:
+    if authCredentials:
         data = authCredentials
         authCredentials = None
         return jsonify(data), 200
