@@ -20,6 +20,8 @@ def storeAuth():
 def retrieveUrl():
     global auth
     if auth:
-        return jsonify(auth), 200
+        temp = auth
+        auth = None
+        return jsonify(temp), 200
     else:
         return jsonify({'error': 'No auth yet'}), 404
