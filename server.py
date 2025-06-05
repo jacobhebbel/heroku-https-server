@@ -1,20 +1,26 @@
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-authURL = None
+authCredentials = None
 
 @app.route('/auth')
-def storeUrl():
-    global authURL
-    authURL = request.url
-    return '', 200
+def storeAuth():
+    global authCredentials
+    code = request.args.get('code')
+    state = request.args.get('state')
+
+    if code:
+        authCredentials = {'ok': True, 'code': code, 'state': state}
+        return 'Authorization received', 200
+    else:
+        return 'Failed to save auth', 400
 
 @app.route('/get')
 def retrieveUrl():
-    global authURL
-    if authURL:
-        url = authURL
-        authURL = None
-        return jsonify({'data': url}), 200
+    global authCredentials
+    if authCredentials.ok:
+        data = authCredentials
+        authCredentials = None
+        return jsonify(data), 200
     else:
-        return jsonify({'error': 'No auth URL yet'}), 401
+        return jsonify({'error': 'No auth URL yet'}), 404
